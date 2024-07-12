@@ -87,12 +87,38 @@ wss.on("connection", async (ws) => {
 
       case EVENT.CREATE_WEBRTC_TRANSPORT:
         const transport = await createWebRtcTransport();
-        ws.send(
-          JSON.stringify({
-            event: EVENT.ON_WEBRTC_TRANSPORT,
-            data: { param: transport },
-          })
-        );
+        if (data.sender) {
+          producerTransport = transport;
+          ws.send(
+            JSON.stringify({
+              event: EVENT.ON_WEBRTC_TRANSPORT,
+              data: {
+                params: {
+                  id: transport.id,
+                  iceParameters: transport.iceParameters,
+                  iceCandidates: transport.iceCandidates,
+                  dtlsParameters: transport.dtlsParameters,
+                },
+              },
+            })
+          );
+        } else {
+          consumerTransport = transport;
+          ws.send(
+            JSON.stringify({
+              event: EVENT.CREATE_RECV_TRANSPORT,
+              data: {
+                params: {
+                  id: transport.id,
+                  iceParameters: transport.iceParameters,
+                  iceCandidates: transport.iceCandidates,
+                  dtlsParameters: transport.dtlsParameters,
+                },
+              },
+            })
+          );
+        }
+
         break;
 
       case EVENT.TRANSPORT_CONNECT:
@@ -106,8 +132,6 @@ wss.on("connection", async (ws) => {
           kind: data.kind,
           rtpParameters: data.rtpParameters,
         });
-
-        console.log("Producer ID: ", producer.id, producer.kind);
 
         producer.on("transportclose", () => {
           console.log("Transport for this producer closed ");
@@ -156,11 +180,14 @@ wss.on("connection", async (ws) => {
             rtpParameters: consumer.rtpParameters,
           };
 
-          ws.send(JSON.stringify({ event: EVENT.CONSUME, data: { params } }));
+          ws.send(
+            JSON.stringify({ event: EVENT.CONSUME_CALLBACK, data: { params } })
+          );
         }
         break;
 
       case EVENT.CONSUMER_RESUME:
+        console.log("consume resume");
         await consumer.resume();
         break;
     }
@@ -194,12 +221,7 @@ const createWebRtcTransport = async () => {
       console.log("Transport closed");
     });
 
-    return {
-      id: transport.id,
-      iceParameters: transport.iceParameters,
-      iceCandidates: transport.iceCandidates,
-      dtlsParameters: transport.dtlsParameters,
-    };
+    return transport;
   } catch (error) {
     console.log(error);
   }

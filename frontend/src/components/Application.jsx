@@ -29,8 +29,10 @@ let params = {
   },
 };
 
+let device, producer, consumer, producerTransport, consumerTransport;
+
 function Application() {
-  const [device, setDevice] = useState(null);
+  // const [device, setDevice] = useState(null);
   const [rtpCapabilities, setRtpCapabilities] = useState(null);
   const { socket } = useMediaSoup();
   const localVideoRef = useRef(null);
@@ -38,24 +40,24 @@ function Application() {
 
   const handleOnWebrtcTransport = (data) => {
     const { params } = data;
-    console.log(params);
+
     if (params?.error) {
       console.log(params?.error);
       return;
     }
 
-    console.log(params);
+    console.log("On webRtc Transport");
 
     // Create a new WebRTC Transport to send media based on the server's producer transport params
-    const newProducerTransport = device.createSendTransport(params);
+    producerTransport = device.createSendTransport(params);
 
     // Handle the 'connect' event
-    newProducerTransport.on(
+    producerTransport.on(
       "connect",
       async ({ dtlsParameters }, callback, errback) => {
         try {
           // Signal local DTLS parameters to the server side transport
-          socket.send(
+          await socket.send(
             JSON.stringify({
               event: EVENTS.TRANSPORT_CONNECT,
               data: { dtlsParameters },
@@ -71,38 +73,106 @@ function Application() {
     );
 
     // Handle the 'produce' event
-    newProducerTransport.on(
-      "produce",
-      async (parameters, callback, errback) => {
-        console.log(parameters);
+    producerTransport.on("produce", async (parameters, callback, errback) => {
+      console.log(parameters);
 
+      try {
+        // Tell the server to create a Producer with the following parameters and produce
+        await socket.send(
+          JSON.stringify({
+            event: EVENTS.TRANSPORT_PRODUCE,
+            data: {
+              kind: parameters.kind,
+              rtpParameters: parameters.rtpParameters,
+              appData: parameters.appData,
+            },
+          })
+        );
+
+        // Handle server response
+        socket.onmessage = (message) => {
+          const { event, data } = JSON.parse(message.data);
+          if (event === EVENTS.TRANSPORT_PRODUCE) {
+            console.log("On transport produce");
+            callback({ id: data.id });
+          } else {
+            errback(new Error("Unexpected response"));
+          }
+        };
+      } catch (error) {
+        errback(error);
+      }
+    });
+  };
+
+  const handleRecvTransport = ({ params }) => {
+    console.log("Inside recv transport");
+
+    // The server sends back params needed
+    // to create Send Transport on the client side
+    if (params.error) {
+      console.log(params.error);
+      return;
+    }
+
+    console.log(params);
+
+    // creates a new WebRTC Transport to receive media
+    // based on server's consumer transport params
+    // https://mediasoup.org/documentation/v3/mediasoup-client/api/#device-createRecvTransport
+    consumerTransport = device.createRecvTransport(params);
+
+    // https://mediasoup.org/documentation/v3/communication-between-client-and-server/#producing-media
+    // this event is raised when a first call to transport.produce() is made
+    // see connectRecvTransport() below
+    consumerTransport.on(
+      "connect",
+      async ({ dtlsParameters }, callback, errback) => {
         try {
-          // Tell the server to create a Producer with the following parameters and produce
-          socket.send(
+          // Signal local DTLS parameters to the server side transport
+          // see server's socket.on('transport-recv-connect', ...)
+          await socket.send(
             JSON.stringify({
-              event: EVENTS.TRANSPORT_PRODUCE,
-              data: {
-                kind: parameters.kind,
-                rtpParameters: parameters.rtpParameters,
-                appData: parameters.appData,
-              },
+              event: EVENTS.TRANSPORT_RECV_CONNECT,
+              data: { dtlsParameters },
             })
           );
 
-          // Handle server response
-          socket.onmessage = (message) => {
-            const { event, data } = JSON.parse(message.data);
-            if (event === EVENTS.TRANSPORT_PRODUCE) {
-              callback({ id: data.id });
-            } else {
-              errback(new Error("Unexpected response"));
-            }
-          };
+          // Tell the transport that parameters were transmitted.
+          callback();
         } catch (error) {
+          // Tell the transport that something was wrong
           errback(error);
         }
       }
     );
+  };
+
+  const handleConsumeCallback = async ({ params }) => {
+    console.log("Inside consume callback");
+    if (params.error) {
+      console.log("Cannot Consume");
+      return;
+    }
+
+    console.log(params);
+    // then consume with the local consumer transport
+    // which creates a consumer
+    consumer = await consumerTransport.consume({
+      id: params.id,
+      producerId: params.producerId,
+      kind: params.kind,
+      rtpParameters: params.rtpParameters,
+    });
+
+    // destructure and retrieve the video track from the producer
+    const { track } = consumer;
+
+    remoteVideoRef.current.srcObject = new MediaStream([track]);
+
+    // the server consumer started with media paused
+    // so we need to inform the server to resume
+    socket.send(JSON.stringify({ event: EVENTS.CONSUMER_RESUME }));
   };
 
   // ACTIONS 1-7
@@ -154,16 +224,15 @@ function Application() {
   //STEP 3 Create a devce
   const createDevice = async () => {
     try {
-      const newDevice = new mediasoupClient.Device();
+      device = new mediasoupClient.Device();
 
       // https://mediasoup.org/documentation/v3/mediasoup-client/api/#device-load
       // Loads the device with RTP capabilities of the Router (server side)
-      await newDevice.load({
+      await device.load({
         // see getRtpCapabilities() below
         routerRtpCapabilities: rtpCapabilities,
       });
-      setDevice(newDevice);
-      console.log("RTP Capabilities", newDevice.rtpCapabilities);
+      console.log("RTP Capabilities", device.rtpCapabilities);
     } catch (error) {
       console.log(error);
       if (error.name === "UnsupportedError")
@@ -182,12 +251,59 @@ function Application() {
     );
   };
 
+  // STEP 5
+  const connectSendTransport = async () => {
+    // we now call produce() to instruct the producer transport
+    // to send media to the Router
+    // https://mediasoup.org/documentation/v3/mediasoup-client/api/#transport-produce
+    // this action will trigger the 'connect' and 'produce' events above
+    producer = await producerTransport.produce(params);
+
+    producer.on("trackended", () => {
+      console.log("track ended");
+
+      // close video track
+    });
+
+    producer.on("transportclose", () => {
+      console.log("transport ended");
+
+      // close video track
+    });
+  };
+
+  // STEP 6
+  const createRecvTransport = async () => {
+    // see server's socket.on('consume', sender?, ...)
+    // this is a call from Consumer, so sender = false
+    await socket.send(
+      JSON.stringify({
+        event: EVENTS.CREATE_WEBRTC_TRANSPORT,
+        data: { sender: false },
+      })
+    );
+  };
+
+  // STEP 7
+  const connectRecvTransport = async () => {
+    // for consumer, we need to tell the server first
+    // to create a consumer based on the rtpCapabilities and consume
+    // if the router can consume, it will send back a set of params as below
+    await socket.send(
+      JSON.stringify({
+        event: EVENTS.CONSUME,
+        data: { rtpCapabilities: device.rtpCapabilities },
+      })
+    );
+  };
+
   useEffect(() => {
     if (!socket) return;
     socket.onmessage = async (message) => {
       const { event, data } = JSON.parse(message.data);
 
-      console.log({ event, data });
+      console.log("Event triggered : ", event);
+
       switch (event) {
         case EVENTS.ON_RTP_CAPABILITIES:
           setRtpCapabilities(data.rtpCapabilities);
@@ -196,6 +312,13 @@ function Application() {
         case EVENTS.ON_WEBRTC_TRANSPORT:
           handleOnWebrtcTransport(data);
           break;
+
+        case EVENTS.CREATE_RECV_TRANSPORT:
+          handleRecvTransport(data);
+          break;
+
+        case EVENTS.CONSUME_CALLBACK:
+          handleConsumeCallback(data);
 
         default:
           break;
@@ -221,13 +344,15 @@ function Application() {
           REMOTE STREAM
           <video
             ref={remoteVideoRef}
+            autoPlay
+            muted
             src=""
             className="w-[30rem] bg-black rounded-md border border-amber-400"
           />
         </div>
       </div>
 
-      <div className=" gap-2  w-full px-60 grid grid-cols-12">
+      <div className=" gap-2  w-full lg:px-60 md:px-32 sm:12 grid md:grid-cols-12 sm:grid-cols-9 grid-cols-6">
         <button
           onClick={getLocalStream}
           className="bg-black col-span-3 active:scale-95 transition-all mt-4 text-white px-4 py-2 rounded-md"
@@ -253,19 +378,19 @@ function Application() {
           4. Create send transport
         </button>
         <button
-          onClick={() => {}}
+          onClick={connectSendTransport}
           className="bg-black col-span-3 active:scale-95 transition-all mt-4 text-white px-4 py-2 rounded-md"
         >
           5. Connect send transport and produce
         </button>
         <button
-          onClick={() => {}}
+          onClick={createRecvTransport}
           className="bg-black col-span-3 active:scale-95 transition-all mt-4 text-white px-4 py-2 rounded-md"
         >
           6. Create recv transport
         </button>
         <button
-          onClick={() => {}}
+          onClick={connectRecvTransport}
           className="bg-black col-span-3 active:scale-95 transition-all mt-4 text-white px-4 py-2 rounded-md"
         >
           7. Connect recv transport and consume
