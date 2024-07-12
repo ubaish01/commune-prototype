@@ -166,8 +166,8 @@ function Application() {
     });
 
     // destructure and retrieve the video track from the producer
-    const { track } = consumer;
-
+    const { track, audioTrack } = consumer;
+    console.log({ track, audioTrack });
     remoteVideoRef.current.srcObject = new MediaStream([track]);
 
     // the server consumer started with media paused
@@ -182,7 +182,7 @@ function Application() {
     console.log("Working");
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
+        audio: true,
         video: {
           width: {
             min: 640,
@@ -205,8 +205,11 @@ function Application() {
       localVideoRef.current.srcObject = stream;
     }
     const track = stream.getVideoTracks()[0];
+    const audioTrack = stream.getAudioTracks()[0];
+    // console.log({ audioTrack, track });
     params = {
       track,
+      audioTrack,
       ...params,
     };
   };
@@ -345,7 +348,6 @@ function Application() {
           <video
             ref={remoteVideoRef}
             autoPlay
-            muted
             src=""
             className="w-[30rem] bg-black rounded-md border border-amber-400"
           />
