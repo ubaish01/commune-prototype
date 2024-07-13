@@ -68,13 +68,12 @@ wss.on("connection", async (ws) => {
     console.log("Peer disconnected");
   });
 
-  router = await worker.createRouter({ mediaCodecs });
-
   ws.on("message", async (message) => {
     const { event, data } = JSON.parse(message);
     console.log(event);
     switch (event) {
       case EVENT.GET_RTP_CAPABILITIES:
+        if (!router) router = await worker.createRouter({ mediaCodecs });
         console.log("Getting rtp capabilities");
         const rtpCapabilities = router.rtpCapabilities;
         ws.send(
