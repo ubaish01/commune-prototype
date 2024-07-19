@@ -45,8 +45,6 @@ let audioParams;
 let videoParams = { params };
 let consumingTransports = [];
 
-const roomName = window.location.pathname.split("/")[2];
-
 export const EVENT = {
   CONNECTION_SUCCESS: "connection-success",
   JOIN_ROOM: "join-room",
@@ -68,7 +66,7 @@ export const EVENT = {
   NEW_PRODUCER: "new-producer",
 };
 
-const Version3 = () => {
+const Version3 = ({ roomName }) => {
   const { socket } = useMediaSoup();
 
   // SOCKET ACTIONS
