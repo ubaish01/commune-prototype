@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-const WS_URL = "ws://localhost:3000";
+const WS_URL = import.meta.env.VITE_REACT_WS_URL;
 const useMediaSoup = () => {
   const [socket, setSocket] = useState(null);
+  // console.log(import.meta.env.VITE_REACT_WS_URL);
 
   useEffect(() => {
     const ws = new WebSocket(WS_URL);
