@@ -426,6 +426,7 @@ wss.on("connection", async (socket) => {
 
         try {
           await consumer.resume();
+          console.log("id : ", consumerData.consumer.id);
           console.log(`Consumer ${serverConsumerId} resumed successfully`);
         } catch (error) {
           console.error(`Error resuming consumer ${serverConsumerId}`, error);

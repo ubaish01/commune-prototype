@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import * as mediasoupClient from "mediasoup-client";
 import useMediaSoup from "../hooks/useMediasoup";
+import { Sleep } from "../constants";
 
 const sendMessage = async (socket, event, data = {}) => {
   if (socket) {
@@ -183,9 +184,9 @@ const Version3 = ({ roomName }) => {
     connectRecvTransport(consumerTransport, remoteProducerId, params.id);
   };
 
-  const signalNewConsumerTransport = async (remoteProducerId, index) => {
+  const signalNewConsumerTransport = async (remoteProducerId) => {
     //check if we are already consuming the remoteProducerId
-    console.log(`${index + 1} : ${remoteProducerId}`);
+    // console.log(`${index + 1} : ${remoteProducerId}`);
     if (consumingTransports.includes(remoteProducerId)) return;
     consumingTransports.push(remoteProducerId);
 
@@ -240,11 +241,12 @@ const Version3 = ({ roomName }) => {
       // and append to the video container
       const newElem = document.createElement("div");
       newElem.setAttribute("id", `td-${remoteProducerId}`);
-      newElem.setAttribute("class", "remoteVideo");
+      newElem.setAttribute(
+        "class",
+        "remoteVideo border  rounded-md overflow-hidden md:col-span-2 col-span-3"
+      );
       newElem.innerHTML =
-        '<video style="border:"2px solid white;border-radium:16px" id="' +
-        remoteProducerId +
-        '" autoPlay class="video" ></video>';
+        '<video id="' + remoteProducerId + '" autoPlay class="video" ></video>';
       videoContainer.appendChild(newElem);
 
       // destructure and retrieve the video track from the producer
@@ -357,11 +359,16 @@ const Version3 = ({ roomName }) => {
     });
   };
 
-  const handleGetProducers = ({ producerList }) => {
+  const handleGetProducers = async ({ producerList }) => {
     producersIds = producerList;
     // for each of the producer create a consumer
     // producerIds.forEach(id => signalNewConsumerTransport(id))
-    producerList.forEach(signalNewConsumerTransport);
+    for (let i = 0; i < producerList.length; i++) {
+      const id = producerList[i];
+      console.log("Executed : ", i);
+      await signalNewConsumerTransport(id);
+      await Sleep(100); // Pause for 5 seconds
+    }
   };
 
   const handleCreateSendTransport = (data) => {
@@ -516,18 +523,14 @@ const Version3 = ({ roomName }) => {
   return (
     <div className="flex items-center justify-center p-8">
       <div id="video">
-        <table className="mainTable">
-          <tbody>
-            <tr>
-              <td className="localColumn">
-                <video id="localVideo" autoPlay className="video" muted></video>
-              </td>
-              <td className="remoteColumn">
-                <div id="videoContainer"></div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div className="remoteColumn ">
+          <div className="grid grid-cols-6 gap-4" id="videoContainer">
+            <div className="md:col-span-2 col-span-3 relative border-2 border-purple-500 rounded-md overflow-hidden">
+              <div className="absolute top-1 left-2">you*</div>
+              <video id="localVideo" autoPlay className="video" muted></video>
+            </div>
+          </div>
+        </div>
         <table>
           <tbody>
             <tr>
