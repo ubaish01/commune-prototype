@@ -44,6 +44,7 @@ let isProducer = false;
 let audioParams;
 let videoParams = { params };
 let consumingTransports = [];
+let producersIds = [];
 
 export const EVENT = {
   CONNECTION_SUCCESS: "connection-success",
@@ -64,6 +65,7 @@ export const EVENT = {
   WEB_RTC_TRANPORT_CONSUMER_CALLBACK: "web-rtc-consumer-callback",
   PRODUCER_CLOSED: "producer-closed",
   NEW_PRODUCER: "new-producer",
+  CONSUMER_RESUME: "consumer-resume",
 };
 
 const Version3 = ({ roomName }) => {
@@ -78,7 +80,7 @@ const Version3 = ({ roomName }) => {
   const streamSuccess = (stream) => {
     localVideo.srcObject = stream;
 
-    audioParams = { track: stream.getAudioTracks()[0], ...audioParams };
+    // audioParams = { track: stream.getAudioTracks()[0], ...audioParams };
     videoParams = { track: stream.getVideoTracks()[0], ...videoParams };
 
     joinRoom();
@@ -137,65 +139,60 @@ const Version3 = ({ roomName }) => {
     sendMessage(socket, EVENT.GET_PRODUCERS);
   };
 
-  const signalNewConsumerTransport = async (remoteProducerId) => {
+  const handleOnWebrtcTransportConsumer = ({ params, remoteProducerId }) => {
+    // The server sends back params needed
+    // to create Send Transport on the client side
+    console.log("WEB_RTC_TRANPORT_CONSUMER_CALLBACK");
+    if (params.error) {
+      console.error(params.error);
+      return;
+    }
+    //   console.log(`PARAMS... ${params}`);
+
+    let consumerTransport;
+    try {
+      consumerTransport = device.createRecvTransport(params);
+    } catch (error) {
+      // exceptions:
+      // {InvalidStateError} if not loaded
+      // {TypeError} if wrong arguments.
+      console.error(error);
+      return;
+    }
+
+    consumerTransport.on(
+      "connect",
+      async ({ dtlsParameters }, callback, errback) => {
+        try {
+          // Signal local DTLS parameters to the server side transport
+          // see server's socket.on('transport-recv-connect', ...)
+          await sendMessage(socket, EVENT.TRANSPORT_RECV_CONNECT, {
+            dtlsParameters,
+            serverConsumerTransportId: params.id,
+          });
+
+          // Tell the transport that parameters were transmitted.
+          callback();
+        } catch (error) {
+          // Tell the transport that something was wrong
+          errback(error);
+        }
+      }
+    );
+
+    connectRecvTransport(consumerTransport, remoteProducerId, params.id);
+  };
+
+  const signalNewConsumerTransport = async (remoteProducerId, index) => {
     //check if we are already consuming the remoteProducerId
+    console.log(`${index + 1} : ${remoteProducerId}`);
     if (consumingTransports.includes(remoteProducerId)) return;
     consumingTransports.push(remoteProducerId);
 
     await sendMessage(socket, EVENT.CREATE_WEB_RTC_TRANSPORT, {
       consumer: true,
+      remoteProducerId,
     });
-
-    const handleOnWebrtcTransportConsumer = ({ params }) => {
-      // The server sends back params needed
-      // to create Send Transport on the client side
-      console.log("WEB_RTC_TRANPORT_CONSUMER_CALLBACK");
-      if (params.error) {
-        console.error(params.error);
-        return;
-      }
-      //   console.log(`PARAMS... ${params}`);
-
-      let consumerTransport;
-      try {
-        consumerTransport = device.createRecvTransport(params);
-      } catch (error) {
-        // exceptions:
-        // {InvalidStateError} if not loaded
-        // {TypeError} if wrong arguments.
-        console.error(error);
-        return;
-      }
-
-      consumerTransport.on(
-        "connect",
-        async ({ dtlsParameters }, callback, errback) => {
-          try {
-            // Signal local DTLS parameters to the server side transport
-            // see server's socket.on('transport-recv-connect', ...)
-            await sendMessage(socket, EVENT.TRANSPORT_RECV_CONNECT, {
-              dtlsParameters,
-              serverConsumerTransportId: params.id,
-            });
-
-            // Tell the transport that parameters were transmitted.
-            callback();
-          } catch (error) {
-            // Tell the transport that something was wrong
-            errback(error);
-          }
-        }
-      );
-
-      connectRecvTransport(consumerTransport, remoteProducerId, params.id);
-    };
-
-    socket.onmessage = (message) => {
-      const { event, data } = JSON.parse(message.data);
-      if (event === EVENT.WEB_RTC_TRANPORT_CONSUMER_CALLBACK)
-        handleOnWebrtcTransportConsumer(data);
-      else manageSocketEvents(event, data);
-    };
   };
 
   const connectRecvTransport = async (
@@ -206,6 +203,7 @@ const Version3 = ({ roomName }) => {
     // for consumer, we need to tell the server first
     // to create a consumer based on the rtpCapabilities and consume
     // if the router can consume, it will send back a set of params as below
+    console.log("Send Consume");
     await sendMessage(socket, EVENT.CONSUME, {
       rtpCapabilities: device.rtpCapabilities,
       remoteProducerId,
@@ -244,21 +242,69 @@ const Version3 = ({ roomName }) => {
       newElem.setAttribute("id", `td-${remoteProducerId}`);
       newElem.setAttribute("class", "remoteVideo");
       newElem.innerHTML =
-        '<video id="' + remoteProducerId + '" autoPlay class="video" ></video>';
+        '<video style="border:"2px solid white;border-radium:16px" id="' +
+        remoteProducerId +
+        '" autoPlay class="video" ></video>';
       videoContainer.appendChild(newElem);
 
       // destructure and retrieve the video track from the producer
       const { track } = consumer;
-
-      document.getElementById(remoteProducerId).srcObject = new MediaStream([
-        track,
-      ]);
+      const videoElement = document.getElementById(remoteProducerId);
+      console.log({ track });
+      console.log(videoElement);
+      videoElement.srcObject = new MediaStream([track]);
 
       // the server consumer started with media paused
       // so we need to inform the server to resume
+      console.log("Send Consumer Resume, id : ", remoteProducerId);
       sendMessage(socket, EVENT.CONSUMER_RESUME, {
         serverConsumerId: params.serverConsumerId,
       });
+
+      // Log to check if the video element is set up correctly
+      videoElement.onloadedmetadata = () => {
+        console.log(`Video element ${remoteProducerId} loaded metadata`);
+        videoElement
+          .play()
+          .then(() => {
+            console.log(`Video element ${remoteProducerId} is playing`);
+          })
+          .catch((err) => {
+            console.error(
+              `Error playing video element ${remoteProducerId}`,
+              err
+            );
+          });
+      };
+
+      // Log to check if the video element is set up correctly
+      videoElement.onloadedmetadata = () => {
+        console.log(`Video element ${remoteProducerId} loaded metadata`);
+        videoElement
+          .play()
+          .then(() => {
+            console.log(`Video element ${remoteProducerId} is playing`);
+          })
+          .catch((err) => {
+            console.error(
+              `Error playing video element ${remoteProducerId}`,
+              err
+            );
+          });
+      };
+
+      // Log when the track is muted or ended
+      track.onmute = () => {
+        console.warn(`Track for ${remoteProducerId} is muted`);
+      };
+
+      track.onunmute = () => {
+        console.log(`Track for ${remoteProducerId} is unmuted`);
+      };
+
+      track.onended = () => {
+        console.error(`Track for ${remoteProducerId} has ended`);
+      };
     };
 
     socket.onmessage = (message) => {
@@ -312,7 +358,7 @@ const Version3 = ({ roomName }) => {
   };
 
   const handleGetProducers = ({ producerList }) => {
-    console.log({ producerList });
+    producersIds = producerList;
     // for each of the producer create a consumer
     // producerIds.forEach(id => signalNewConsumerTransport(id))
     producerList.forEach(signalNewConsumerTransport);
@@ -441,6 +487,10 @@ const Version3 = ({ roomName }) => {
 
       case EVENT.NEW_PRODUCER:
         handleNewProducer(data);
+        break;
+
+      case EVENT.WEB_RTC_TRANPORT_CONSUMER_CALLBACK:
+        handleOnWebrtcTransportConsumer(data);
         break;
 
       default:
