@@ -44,7 +44,7 @@ let consumers = []; // [ { socketId1, roomName1, consumer, }, ... ]
 const createWorker = async () => {
   worker = await mediasoup.createWorker({
     rtcMinPort: 2000,
-    rtcMaxPort: 2020,
+    rtcMaxPort: 5000,
   });
   console.log(`worker pid ${worker.pid}`);
 
@@ -241,6 +241,7 @@ wss.on("connection", async (socket) => {
 
         if (data.consumer) {
           sendMessage(socket, EVENT.WEB_RTC_TRANPORT_CONSUMER_CALLBACK, {
+            remoteProducerId: data.remoteProducerId,
             params: {
               id: transport.id,
               iceParameters: transport.iceParameters,
@@ -414,135 +415,23 @@ wss.on("connection", async (socket) => {
 
       case EVENT.CONSUMER_RESUME: {
         const { serverConsumerId } = data;
-        console.log("consumer resume");
-        const { consumer } = consumers.find(
+        const consumerData = consumers.find(
           (consumerData) => consumerData.consumer.id === serverConsumerId
         );
-        await consumer.resume();
+        if (!consumerData) {
+          console.error(`Consumer with id ${serverConsumerId} not found`);
+          return;
+        }
+        const { consumer } = consumerData;
+
+        try {
+          await consumer.resume();
+          console.log(`Consumer ${serverConsumerId} resumed successfully`);
+        } catch (error) {
+          console.error(`Error resuming consumer ${serverConsumerId}`, error);
+        }
         break;
       }
-
-      // PREVIOUS CODE BELOW
-
-      case EVENT.GET_RTP_CAPABILITIES:
-        if (!router) router = await worker.createRouter({ mediaCodecs });
-        console.log("Getting rtp capabilities");
-        const rtpCapabilities = router.rtpCapabilities;
-        ws.send(
-          JSON.stringify({
-            event: EVENT.ON_RTP_CAPABILITIES,
-            data: { rtpCapabilities },
-          })
-        );
-        break;
-
-      case EVENT.CREATE_WEB_RTC_TRANSPORT:
-        const transport = await createWebRtcTransport();
-        if (data.sender) {
-          producerTransport = transport;
-          ws.send(
-            JSON.stringify({
-              event: EVENT.ON_WEBRTC_TRANSPORT,
-              data: {
-                params: {
-                  id: transport.id,
-                  iceParameters: transport.iceParameters,
-                  iceCandidates: transport.iceCandidates,
-                  dtlsParameters: transport.dtlsParameters,
-                },
-              },
-            })
-          );
-        } else {
-          consumerTransport = transport;
-          ws.send(
-            JSON.stringify({
-              event: EVENT.CREATE_RECV_TRANSPORT,
-              data: {
-                params: {
-                  id: transport.id,
-                  iceParameters: transport.iceParameters,
-                  iceCandidates: transport.iceCandidates,
-                  dtlsParameters: transport.dtlsParameters,
-                },
-              },
-            })
-          );
-        }
-
-        break;
-
-      case EVENT.TRANSPORT_CONNECT:
-        await producerTransport.connect({
-          dtlsParameters: data.dtlsParameters,
-        });
-        break;
-
-      case EVENT.TRANSPORT_PRODUCE:
-        producer = await producerTransport.produce({
-          kind: data.kind,
-          rtpParameters: data.rtpParameters,
-        });
-
-        producer.on("transportclose", () => {
-          console.log("Transport for this producer closed ");
-          producer.close();
-        });
-
-        ws.send(
-          JSON.stringify({
-            event: EVENT.TRANSPORT_PRODUCE,
-            data: { id: producer.id },
-          })
-        );
-        break;
-
-      case EVENT.TRANSPORT_RECV_CONNECT:
-        await consumerTransport.connect({
-          dtlsParameters: data.dtlsParameters,
-        });
-        break;
-
-      case EVENT.CONSUME:
-        if (
-          router.canConsume({
-            producerId: producer.id,
-            rtpCapabilities: data.rtpCapabilities,
-          })
-        ) {
-          consumer = await consumerTransport.consume({
-            producerId: producer.id,
-            rtpCapabilities: data.rtpCapabilities,
-            paused: true,
-          });
-
-          consumer.on("transportclose", () => {
-            console.log("Transport close from consumer");
-          });
-
-          consumer.on("producerclose", () => {
-            console.log("Producer of consumer closed");
-          });
-
-          const params = {
-            id: consumer.id,
-            producerId: producer.id,
-            kind: consumer.kind,
-            rtpParameters: consumer.rtpParameters,
-          };
-
-          ws.send(
-            JSON.stringify({ event: EVENT.CONSUME_CALLBACK, data: { params } })
-          );
-        }
-        break;
-
-      case EVENT.CONSUMER_RESUME:
-        console.log("consume resume");
-        await consumer.resume();
-        break;
-
-      // PREVIOUS CODE ABOVE
     }
   });
 });
@@ -554,8 +443,9 @@ const createWebRtcTransport = async (router) => {
       const webRtcTransport_options = {
         listenIps: [
           {
-            ip: "0.0.0.0",
-            announcedIp: "127.0.0.1",
+            ip: "127.0.0.1",
+            // ip: "0.0.0.0",
+            // announcedIp: "127.0.0.1",
           },
         ],
         enableUdp: true,

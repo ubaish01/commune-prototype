@@ -18,6 +18,7 @@ module.exports = {
     WEB_RTC_TRANPORT_CONSUMER_CALLBACK: "web-rtc-consumer-callback",
     PRODUCER_CLOSED: "producer-closed",
     NEW_PRODUCER: "new-producer",
+    CONSUMER_RESUME: "consumer-resume",
   },
 };
 // module.exports = {
