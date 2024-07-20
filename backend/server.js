@@ -9,7 +9,7 @@ const { EVENT } = require("./constants");
 
 const sendMessage = async (socket, event, data = {}) => {
   if (socket) {
-    await socket.send(JSON.stringify(event, data));
+    await socket.send(JSON.stringify({ event, data }));
   }
 };
 
@@ -81,91 +81,13 @@ const mediaCodecs = [
   },
 ];
 
-const createRoom = async (roomName, socketId) => {
-  // worker.createRouter(options)
-  // options = { mediaCodecs, appData }
-  // mediaCodecs -> defined above
-  // appData -> custom application data - we are not supplying any
-  // none of the two are required
-  let router1;
-  let peers = [];
-  if (rooms[roomName]) {
-    router1 = rooms[roomName].router;
-    peers = rooms[roomName].peers || [];
-  } else {
-    router1 = await worker.createRouter({ mediaCodecs });
-  }
-
-  console.log(`Router ID: ${router1.id}`, peers.length);
-
-  rooms[roomName] = {
-    router: router1,
-    peers: [...peers, socketId],
-  };
-
-  return router1;
-};
-
-const addTransport = (transport, roomName, consumer) => {
-  transports = [
-    ...transports,
-    { socketId: socket.id, transport, roomName, consumer },
-  ];
-
-  peers[socket.id] = {
-    ...peers[socket.id],
-    transports: [...peers[socket.id].transports, transport.id],
-  };
-};
-
-const addProducer = (producer, roomName) => {
-  producers = [...producers, { socketId: socket.id, producer, roomName }];
-
-  peers[socket.id] = {
-    ...peers[socket.id],
-    producers: [...peers[socket.id].producers, producer.id],
-  };
-};
-
-const addConsumer = (consumer, roomName) => {
-  // add the consumer to the consumers list
-  consumers = [...consumers, { socketId: socket.id, consumer, roomName }];
-
-  // add the consumer id to the peers list
-  peers[socket.id] = {
-    ...peers[socket.id],
-    consumers: [...peers[socket.id].consumers, consumer.id],
-  };
-};
-
-const informConsumers = (roomName, socketId, id) => {
-  console.log(`just joined, id ${id} ${roomName}, ${socketId}`);
-  // A new producer just joined
-  // let all consumers to consume this producer
-  producers.forEach((producerData) => {
-    if (
-      producerData.socketId !== socketId &&
-      producerData.roomName === roomName
-    ) {
-      const producerSocket = peers[producerData.socketId].socket;
-      // use socket to send producer id to producer
-      sendMessage(producerSocket, EVENT.NEW_PRODUCER, { producerId: id });
-    }
-  });
-};
-
-const getTransport = (socketId) => {
-  const [producerTransport] = transports.filter(
-    (transport) => transport.socketId === socketId && !transport.consumer
-  );
-  return producerTransport.transport;
-};
-
 wss.on("connection", async (socket) => {
   socket.id = v4();
   console.log("New connection : ", socket.id);
 
-  sendMessage(socket, EVENT.CONNECTION_SUCCESS);
+  setTimeout(() => {
+    sendMessage(socket, EVENT.CONNECTION_SUCCESS);
+  }, 1000);
 
   const removeItems = (items, socketId, type) => {
     items.forEach((item) => {
@@ -178,6 +100,86 @@ wss.on("connection", async (socket) => {
     return items;
   };
 
+  const createRoom = async (roomName, socketId) => {
+    // worker.createRouter(options)
+    // options = { mediaCodecs, appData }
+    // mediaCodecs -> defined above
+    // appData -> custom application data - we are not supplying any
+    // none of the two are required
+    let router1;
+    let peers = [];
+    if (rooms[roomName]) {
+      router1 = rooms[roomName].router;
+      peers = rooms[roomName].peers || [];
+    } else {
+      router1 = await worker.createRouter({ mediaCodecs });
+    }
+
+    console.log(`Router ID: ${router1.id}`, peers.length);
+
+    rooms[roomName] = {
+      router: router1,
+      peers: [...peers, socketId],
+    };
+
+    return router1;
+  };
+
+  const addTransport = (transport, roomName, consumer) => {
+    transports = [
+      ...transports,
+      { socketId: socket.id, transport, roomName, consumer },
+    ];
+
+    peers[socket.id] = {
+      ...peers[socket.id],
+      transports: [...peers[socket.id].transports, transport.id],
+    };
+  };
+
+  const addProducer = (producer, roomName) => {
+    producers = [...producers, { socketId: socket.id, producer, roomName }];
+
+    peers[socket.id] = {
+      ...peers[socket.id],
+      producers: [...peers[socket.id].producers, producer.id],
+    };
+  };
+
+  const addConsumer = (consumer, roomName) => {
+    // add the consumer to the consumers list
+    consumers = [...consumers, { socketId: socket.id, consumer, roomName }];
+
+    // add the consumer id to the peers list
+    peers[socket.id] = {
+      ...peers[socket.id],
+      consumers: [...peers[socket.id].consumers, consumer.id],
+    };
+  };
+
+  const informConsumers = (roomName, socketId, id) => {
+    console.log(`just joined, id ${id} ${roomName}, ${socketId}`);
+    // A new producer just joined
+    // let all consumers to consume this producer
+    producers.forEach((producerData) => {
+      if (
+        producerData.socketId !== socketId &&
+        producerData.roomName === roomName
+      ) {
+        const producerSocket = peers[producerData.socketId].socket;
+        // use socket to send producer id to producer
+        sendMessage(producerSocket, EVENT.NEW_PRODUCER, { producerId: id });
+      }
+    });
+  };
+
+  const getTransport = (socketId) => {
+    const [producerTransport] = transports.filter(
+      (transport) => transport.socketId === socketId && !transport.consumer
+    );
+    return producerTransport.transport;
+  };
+
   socket.on("close", () => {
     console.log("Peer disconnected");
     // do some cleanup
@@ -186,14 +188,18 @@ wss.on("connection", async (socket) => {
     producers = removeItems(producers, socket.id, "producer");
     transports = removeItems(transports, socket.id, "transport");
 
-    const { roomName } = peers[socket.id];
-    delete peers[socket.id];
+    if (peers[socket.id]) {
+      const { roomName } = peers[socket.id];
+      delete peers[socket.id];
 
-    // remove socket from room
-    rooms[roomName] = {
-      router: rooms[roomName].router,
-      peers: rooms[roomName].peers.filter((socketId) => socketId !== socket.id),
-    };
+      // remove socket from room
+      rooms[roomName] = {
+        router: rooms[roomName].router,
+        peers: rooms[roomName].peers.filter(
+          (socketId) => socketId !== socket.id
+        ),
+      };
+    }
   });
 
   socket.on("message", async (message) => {
@@ -201,6 +207,7 @@ wss.on("connection", async (socket) => {
     console.log(event);
     switch (event) {
       case EVENT.JOIN_ROOM: {
+        const { roomName } = data;
         const router1 = await createRoom(roomName, socket.id);
 
         peers[socket.id] = {
@@ -231,14 +238,26 @@ wss.on("connection", async (socket) => {
         const router = rooms[roomName].router;
 
         const transport = await createWebRtcTransport(router);
-        sendMessage(socket, EVENT.CREATE_WEB_RTC_TRANSPORT_CALLBACK, {
-          params: {
-            id: transport.id,
-            iceParameters: transport.iceParameters,
-            iceCandidates: transport.iceCandidates,
-            dtlsParameters: transport.dtlsParameters,
-          },
-        });
+
+        if (data.consumer) {
+          sendMessage(socket, EVENT.WEB_RTC_TRANPORT_CONSUMER_CALLBACK, {
+            params: {
+              id: transport.id,
+              iceParameters: transport.iceParameters,
+              iceCandidates: transport.iceCandidates,
+              dtlsParameters: transport.dtlsParameters,
+            },
+          });
+        } else {
+          sendMessage(socket, EVENT.CREATE_WEB_RTC_TRANSPORT_CALLBACK, {
+            params: {
+              id: transport.id,
+              iceParameters: transport.iceParameters,
+              iceCandidates: transport.iceCandidates,
+              dtlsParameters: transport.dtlsParameters,
+            },
+          });
+        }
 
         // add transport to Peer's properties
         addTransport(transport, roomName, data.consumer);
@@ -261,7 +280,10 @@ wss.on("connection", async (socket) => {
         });
 
         // return the producer list back to the client
-        sendMessage(socket, EVENT.GET_PRODUCERS_CALLBACK);
+        sendMessage(socket, EVENT.GET_PRODUCERS_CALLBACK, {
+          producerList,
+          count: producers.length,
+        });
         break;
       }
 
@@ -307,20 +329,96 @@ wss.on("connection", async (socket) => {
 
       case EVENT.TRANSPORT_RECV_CONNECT: {
         const { dtlsParameters, serverConsumerTransportId } = data;
-
+        console.log(`DTLS PARAMS: ${dtlsParameters}`);
+        const consumerTransport = transports.find(
+          (transportData) =>
+            transportData.consumer &&
+            transportData.transport.id == serverConsumerTransportId
+        ).transport;
+        await consumerTransport.connect({ dtlsParameters });
         break;
       }
 
       case EVENT.CONSUME: {
-        const { rtpCapabilities, remoteProducerId, serverConsumerTransportId } =
-          data;
+        try {
+          const {
+            rtpCapabilities,
+            remoteProducerId,
+            serverConsumerTransportId,
+          } = data;
+          const { roomName } = peers[socket.id];
+          const router = rooms[roomName].router;
+          let consumerTransport = transports.find(
+            (transportData) =>
+              transportData.consumer &&
+              transportData.transport.id == serverConsumerTransportId
+          ).transport;
+
+          // check if the router can consume the specified producer
+          if (
+            router.canConsume({
+              producerId: remoteProducerId,
+              rtpCapabilities,
+            })
+          ) {
+            // transport can now consume and return a consumer
+            const consumer = await consumerTransport.consume({
+              producerId: remoteProducerId,
+              rtpCapabilities,
+              paused: true,
+            });
+
+            consumer.on("transportclose", () => {
+              console.log("transport close from consumer");
+            });
+
+            consumer.on("producerclose", () => {
+              console.log("producer of consumer closed");
+              sendMessage(socket, EVENT.PRODUCER_CLOSED, { remoteProducerId });
+
+              consumerTransport.close([]);
+              transports = transports.filter(
+                (transportData) =>
+                  transportData.transport.id !== consumerTransport.id
+              );
+              consumer.close();
+              consumers = consumers.filter(
+                (consumerData) => consumerData.consumer.id !== consumer.id
+              );
+            });
+
+            addConsumer(consumer, roomName);
+
+            // from the consumer extract the following params
+            // to send back to the Client
+            const params = {
+              id: consumer.id,
+              producerId: remoteProducerId,
+              kind: consumer.kind,
+              rtpParameters: consumer.rtpParameters,
+              serverConsumerId: consumer.id,
+            };
+
+            // send the parameters to the client
+            sendMessage(socket, EVENT.CONSUME_CALLBACK, { params });
+          }
+        } catch (error) {
+          console.log(error.message);
+          sendMessage(socket, EVENT.CONSUME_CALLBACK, {
+            params: { error: error },
+          });
+        }
 
         break;
       }
 
       case EVENT.CONSUMER_RESUME: {
         const { serverConsumerId } = data;
-
+        console.log("consumer resume");
+        const { consumer } = consumers.find(
+          (consumerData) => consumerData.consumer.id === serverConsumerId
+        );
+        await consumer.resume();
         break;
       }
 

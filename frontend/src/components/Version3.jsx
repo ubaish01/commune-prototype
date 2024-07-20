@@ -4,7 +4,7 @@ import useMediaSoup from "../hooks/useMediasoup";
 
 const sendMessage = async (socket, event, data = {}) => {
   if (socket) {
-    await socket.send(JSON.stringify(event, data));
+    await socket.send(JSON.stringify({ event, data }));
   }
 };
 
@@ -77,11 +77,9 @@ const Version3 = ({ roomName }) => {
 
   const streamSuccess = (stream) => {
     localVideo.srcObject = stream;
-    const track = stream.getVideoTracks()[0];
-    params = {
-      track,
-      ...params,
-    };
+
+    audioParams = { track: stream.getAudioTracks()[0], ...audioParams };
+    videoParams = { track: stream.getVideoTracks()[0], ...videoParams };
 
     joinRoom();
   };
@@ -103,7 +101,7 @@ const Version3 = ({ roomName }) => {
       })
       .then(streamSuccess)
       .catch((error) => {
-        console.log(error.message);
+        console.error(error.message);
       });
   };
 
@@ -124,12 +122,12 @@ const Version3 = ({ roomName }) => {
         routerRtpCapabilities: rtpCapabilities,
       });
 
-      console.log("Device RTP Capabilities", device.rtpCapabilities);
+      //   console.log("Device RTP Capabilities", device.rtpCapabilities);
 
       // once the device loads, create transport
       createSendTransport();
     } catch (error) {
-      console.log(error);
+      console.error(error);
       if (error.name === "UnsupportedError")
         console.warn("browser not supported");
     }
@@ -151,11 +149,12 @@ const Version3 = ({ roomName }) => {
     const handleOnWebrtcTransportConsumer = ({ params }) => {
       // The server sends back params needed
       // to create Send Transport on the client side
+      console.log("WEB_RTC_TRANPORT_CONSUMER_CALLBACK");
       if (params.error) {
-        console.log(params.error);
+        console.error(params.error);
         return;
       }
-      console.log(`PARAMS... ${params}`);
+      //   console.log(`PARAMS... ${params}`);
 
       let consumerTransport;
       try {
@@ -164,7 +163,7 @@ const Version3 = ({ roomName }) => {
         // exceptions:
         // {InvalidStateError} if not loaded
         // {TypeError} if wrong arguments.
-        console.log(error);
+        console.error(error);
         return;
       }
 
@@ -192,9 +191,10 @@ const Version3 = ({ roomName }) => {
     };
 
     socket.onmessage = (message) => {
-      const { event, data } = JSON.parse(message);
+      const { event, data } = JSON.parse(message.data);
       if (event === EVENT.WEB_RTC_TRANPORT_CONSUMER_CALLBACK)
         handleOnWebrtcTransportConsumer(data);
+      else manageSocketEvents(event, data);
     };
   };
 
@@ -214,11 +214,11 @@ const Version3 = ({ roomName }) => {
 
     const consumeCallback = async ({ params }) => {
       if (params.error) {
-        console.log("Cannot Consume");
+        // console.log("Cannot Consume");
         return;
       }
 
-      console.log(`Consumer Params ${params}`);
+      //   console.log(`Consumer Params ${params}`);
       // then consume with the local consumer transport
       // which creates a consumer
       const consumer = await consumerTransport.consume({
@@ -264,12 +264,13 @@ const Version3 = ({ roomName }) => {
     socket.onmessage = (message) => {
       const { event, data } = JSON.parse(message.data);
       if (event === EVENT.CONSUME_CALLBACK) consumeCallback(data);
-      else console.log("Error : ", data);
+      else manageSocketEvents(event, data);
     };
   };
 
   // SOCKET EVENTS HANDLERS
   const handleConnectionSuccess = (data) => {
+    // console.log("Connection success");
     getLocalStream();
   };
 
@@ -284,50 +285,46 @@ const Version3 = ({ roomName }) => {
     // https://mediasoup.org/documentation/v3/mediasoup-client/api/#transport-produce
     // this action will trigger the 'connect' and 'produce' events above
 
-    audioProducer = await producerTransport.produce(audioParams);
+    // audioProducer = await producerTransport.produce(audioParams);
     videoProducer = await producerTransport.produce(videoParams);
 
-    audioProducer.on("trackended", () => {
-      console.log("audio track ended");
+    // audioProducer.on("trackended", () => {
+    //   console.log("audio track ended");
 
-      // close audio track
-    });
+    //   // close audio track
+    // });
 
-    audioProducer.on("transportclose", () => {
-      console.log("audio transport ended");
+    // audioProducer.on("transportclose", () => {
+    //   console.log("audio transport ended");
 
-      // close audio track
-    });
+    //   // close audio track
+    // });
 
     videoProducer.on("trackended", () => {
-      console.log("video track ended");
-
+      //   console.log("video track ended");
       // close video track
     });
 
     videoProducer.on("transportclose", () => {
-      console.log("video transport ended");
-
+      //   console.log("video transport ended");
       // close video track
     });
   };
 
-  const handleGetProducers = ({ producerIds }) => {
-    console.log(producerIds);
+  const handleGetProducers = ({ producerList }) => {
+    console.log({ producerList });
     // for each of the producer create a consumer
     // producerIds.forEach(id => signalNewConsumerTransport(id))
-    producerIds.forEach(signalNewConsumerTransport);
+    producerList.forEach(signalNewConsumerTransport);
   };
 
   const handleCreateSendTransport = (data) => {
     const { params } = data;
 
     if (params?.error) {
-      console.log(params?.error);
+      //   console.log(params?.error);
       return;
     }
-
-    console.log("On webRtc Transport");
 
     // Create a new WebRTC Transport to send media based on the server's producer transport params
     producerTransport = device.createSendTransport(params);
@@ -357,7 +354,7 @@ const Version3 = ({ roomName }) => {
 
     // Handle the 'produce' event
     producerTransport.on("produce", async (parameters, callback, errback) => {
-      console.log(parameters);
+      //   console.log(parameters);
 
       try {
         // Tell the server to create a Producer with the following parameters and produce
@@ -375,17 +372,18 @@ const Version3 = ({ roomName }) => {
         // Handle server response
         socket.onmessage = (message) => {
           const { event, data } = JSON.parse(message.data);
+          console.log("Event triggered : ", event);
           if (event === EVENT.TRANSPORT_PRODUCE_CALLBACK) {
             console.log("On transport produce");
             callback({ id: data.id });
             if (data.producersExist) getProducers();
           } else {
-            errback(new Error("Unexpected response"));
+            manageSocketEvents(event, data);
           }
         };
         console.log("Calling connect send transport");
       } catch (error) {
-        console.log(error);
+        console.error(error);
         errback(error);
       }
     });
@@ -414,43 +412,50 @@ const Version3 = ({ roomName }) => {
   };
 
   // server informs the client of a new producer just joined
-  const handleNewProducer = ({ producerId }) =>
+  const handleNewProducer = ({ producerId }) => {
+    console.log("new producer : ", producerId);
     signalNewConsumerTransport(producerId);
+  };
+
+  const manageSocketEvents = (event, data) => {
+    switch (event) {
+      case EVENT.CONNECTION_SUCCESS:
+        handleConnectionSuccess();
+        break;
+
+      case EVENT.JOIN_ROOM_CALLBACK:
+        handleJoinRoom(data);
+        break;
+
+      case EVENT.CREATE_WEB_RTC_TRANSPORT_CALLBACK:
+        handleCreateSendTransport(data);
+        break;
+
+      case EVENT.GET_PRODUCERS_CALLBACK:
+        handleGetProducers(data);
+        break;
+
+      case EVENT.PRODUCER_CLOSED:
+        handleProducerClosed(data);
+        break;
+
+      case EVENT.NEW_PRODUCER:
+        handleNewProducer(data);
+        break;
+
+      default:
+        console.error("Unhandeled socket event");
+        console.log({ event, data });
+        break;
+    }
+  };
 
   const HandleSocketEvents = () => {
     if (!socket) return;
     socket.onmessage = async (message) => {
       const { event, data } = JSON.parse(message.data);
       console.log("Event triggered : ", event);
-
-      switch (event) {
-        case EVENT.CONNECTION_SUCCESS:
-          handleConnectionSuccess();
-          break;
-
-        case EVENT.JOIN_ROOM_CALLBACK:
-          handleJoinRoom(data);
-          break;
-
-        case EVENT.CREATE_WEB_RTC_TRANSPORT_CALLBACK:
-          handleCreateSendTransport(data);
-          break;
-
-        case EVENT.GET_PRODUCERS_CALLBACK:
-          handleGetProducers(data);
-          break;
-
-        case EVENT.PRODUCER_CLOSED:
-          handleProducerClosed(data);
-          break;
-
-        case EVENT.NEW_PRODUCER:
-          handleNewProducer(data);
-          break;
-
-        default:
-          break;
-      }
+      manageSocketEvents(event, data);
     };
   };
 
