@@ -516,8 +516,19 @@ const Version3 = ({ roomName }) => {
     };
   };
 
+  const callApi = async () => {
+    try {
+      const res = await fetch(import.meta.env.VITE_REACT_SERVER_URL);
+      const data = await res.json();
+      console.log(data);
+    } catch (error) {
+      console.log(error);
+    }
+  };
+
   useEffect(() => {
     HandleSocketEvents();
+    callApi();
   }, [socket]);
 
   return (
