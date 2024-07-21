@@ -8,6 +8,8 @@ const { WebSocketServer } = require("ws");
 const mediasoup = require("mediasoup");
 const { EVENT } = require("./constants");
 
+const ANNOUNCED_IP = "216.24.57.252:443";
+
 const sendMessage = async (socket, event, data = {}) => {
   if (socket) {
     await socket.send(JSON.stringify({ event, data }));
@@ -24,15 +26,17 @@ app.get("/", (req, res) => {
   return res.json({
     success: true,
     message: "Welcome to the Mediasoup Server",
-    AnnouncedIP: process.env.ANNOUNCED_IP,
+    AnnouncedIP: ANNOUNCED_IP,
   });
 });
+
+// 216.24.57.252:443
 
 const httpServer = http.createServer(app);
 const PORT = process.env.PORT || 5000;
 httpServer.listen(PORT, () => {
   console.log("HTTP server listening on port: " + PORT);
-  console.log("Announced IP : ", process.env.ANNOUNCED_IP);
+  console.log("Announced IP : ", ANNOUNCED_IP);
 });
 
 const wss = new WebSocketServer({ server: httpServer });
@@ -457,7 +461,7 @@ const createWebRtcTransport = async (router) => {
           {
             // ip: "127.0.0.1",
             ip: "0.0.0.0",
-            announcedIp: process.env.ANNOUNCED_IP,
+            announcedIp: ANNOUNCED_IP,
           },
         ],
         enableUdp: true,
