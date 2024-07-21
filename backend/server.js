@@ -24,6 +24,7 @@ app.get("/", (req, res) => {
   return res.json({
     success: true,
     message: "Welcome to the Mediasoup Server",
+    AnnouncedIP: process.env.ANNOUNCED_IP,
   });
 });
 
