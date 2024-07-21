@@ -29,11 +29,16 @@ let params = {
   },
 };
 
-let device, producer, consumer, producerTransport, consumerTransport;
+let device,
+  producer,
+  consumer,
+  producerTransport,
+  consumerTransport,
+  isProducer,
+  rtpCapabilities;
 
 function Application() {
   // const [device, setDevice] = useState(null);
-  const [rtpCapabilities, setRtpCapabilities] = useState(null);
   const { socket } = useMediaSoup();
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
@@ -72,6 +77,8 @@ function Application() {
       }
     );
 
+    console.log("Handelling produce event");
+
     // Handle the 'produce' event
     producerTransport.on("produce", async (parameters, callback, errback) => {
       console.log(parameters);
@@ -99,10 +106,14 @@ function Application() {
             errback(new Error("Unexpected response"));
           }
         };
+        console.log("Calling connect send transport");
       } catch (error) {
+        console.log(error);
         errback(error);
       }
     });
+
+    connectSendTransport();
   };
 
   const handleRecvTransport = ({ params }) => {
@@ -146,6 +157,7 @@ function Application() {
         }
       }
     );
+    connectRecvTransport();
   };
 
   const handleConsumeCallback = async ({ params }) => {
@@ -166,8 +178,8 @@ function Application() {
     });
 
     // destructure and retrieve the video track from the producer
-    const { track } = consumer;
-
+    const { track, audioTrack } = consumer;
+    console.log({ track, audioTrack });
     remoteVideoRef.current.srcObject = new MediaStream([track]);
 
     // the server consumer started with media paused
@@ -182,7 +194,7 @@ function Application() {
     console.log("Working");
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
+        audio: true,
         video: {
           width: {
             min: 640,
@@ -205,10 +217,19 @@ function Application() {
       localVideoRef.current.srcObject = stream;
     }
     const track = stream.getVideoTracks()[0];
+    const audioTrack = stream.getAudioTracks()[0];
+    // console.log({ audioTrack, track });
     params = {
       track,
+      audioTrack,
       ...params,
     };
+    goConnect(true);
+  };
+
+  const goConnect = (producerOrConsumer) => {
+    isProducer = producerOrConsumer;
+    device === undefined ? getRtpCapabilities() : goCreateTransport();
   };
 
   // STEP 2 Get Router's RTP capabilities
@@ -233,11 +254,16 @@ function Application() {
         routerRtpCapabilities: rtpCapabilities,
       });
       console.log("RTP Capabilities", device.rtpCapabilities);
+      goCreateTransport();
     } catch (error) {
       console.log(error);
       if (error.name === "UnsupportedError")
         console.warn("browser not supported");
     }
+  };
+
+  const goCreateTransport = () => {
+    isProducer ? createSendTransport() : createRecvTransport();
   };
 
   // STEP 4 Create send Transport
@@ -297,6 +323,10 @@ function Application() {
     );
   };
 
+  const goConsume = () => {
+    goConnect(false);
+  };
+
   useEffect(() => {
     if (!socket) return;
     socket.onmessage = async (message) => {
@@ -306,7 +336,8 @@ function Application() {
 
       switch (event) {
         case EVENTS.ON_RTP_CAPABILITIES:
-          setRtpCapabilities(data.rtpCapabilities);
+          rtpCapabilities = data.rtpCapabilities;
+          createDevice();
           break;
 
         case EVENTS.ON_WEBRTC_TRANSPORT:
@@ -345,7 +376,6 @@ function Application() {
           <video
             ref={remoteVideoRef}
             autoPlay
-            muted
             src=""
             className="w-[30rem] bg-black rounded-md border border-amber-400"
           />
@@ -357,43 +387,13 @@ function Application() {
           onClick={getLocalStream}
           className="bg-black col-span-3 active:scale-95 transition-all mt-4 text-white px-4 py-2 rounded-md"
         >
-          1. Get Local stream
+          Produce
         </button>
         <button
-          onClick={getRtpCapabilities}
+          onClick={goConsume}
           className="bg-black col-span-3 active:scale-95 transition-all mt-4 text-white px-4 py-2 rounded-md"
         >
-          2. Get rtpCapabilities
-        </button>
-        <button
-          onClick={createDevice}
-          className="bg-black col-span-3 active:scale-95 transition-all mt-4 text-white px-4 py-2 rounded-md"
-        >
-          3. Create Device
-        </button>
-        <button
-          onClick={createSendTransport}
-          className="bg-black col-span-3 active:scale-95 transition-all mt-4 text-white px-4 py-2 rounded-md"
-        >
-          4. Create send transport
-        </button>
-        <button
-          onClick={connectSendTransport}
-          className="bg-black col-span-3 active:scale-95 transition-all mt-4 text-white px-4 py-2 rounded-md"
-        >
-          5. Connect send transport and produce
-        </button>
-        <button
-          onClick={createRecvTransport}
-          className="bg-black col-span-3 active:scale-95 transition-all mt-4 text-white px-4 py-2 rounded-md"
-        >
-          6. Create recv transport
-        </button>
-        <button
-          onClick={connectRecvTransport}
-          className="bg-black col-span-3 active:scale-95 transition-all mt-4 text-white px-4 py-2 rounded-md"
-        >
-          7. Connect recv transport and consume
+          Consume
         </button>
       </div>
     </div>
