@@ -8,7 +8,7 @@ const { WebSocketServer } = require("ws");
 const mediasoup = require("mediasoup");
 const { EVENT } = require("./constants");
 
-const ANNOUNCED_IP = "216.24.57.252:443";
+const ANNOUNCED_IP = "216.24.57.4:443";
 
 const sendMessage = async (socket, event, data = {}) => {
   if (socket) {
