@@ -20,6 +20,13 @@ const app = express();
 app.use(cors());
 app.use(express.static(path.join(__dirname, "public")));
 
+app.get("/", (req, res) => {
+  return res.json({
+    success: true,
+    message: "Welcome to the Mediasoup Server",
+  });
+});
+
 const httpServer = http.createServer(app);
 const PORT = process.env.PORT || 5000;
 httpServer.listen(PORT, () => {
